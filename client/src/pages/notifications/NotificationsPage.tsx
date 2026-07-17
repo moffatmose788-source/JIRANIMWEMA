@@ -1,0 +1,151 @@
+/**
+ * BOMAENGWE WELFARE — Notifications Page
+ */
+
+import { useEffect, useState } from 'react';
+import DashboardLayout from '@/components/DashboardLayout';
+import { motion } from 'framer-motion';
+import { Button } from '@/components/ui/button';
+import { Bell, CheckCheck, Landmark, HandHeart, CalendarDays, Megaphone, DollarSign } from 'lucide-react';
+import { cn, formatDate } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
+import { notificationsService, type Notification } from '@/lib/firestore';
+import { toast } from 'sonner';
+
+const defaultNotifications: Notification[] = [];
+
+const TYPE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  contribution: DollarSign,
+  loan: Landmark,
+  welfare: HandHeart,
+  meeting: CalendarDays,
+  announcement: Megaphone,
+  general: Bell,
+};
+
+const TYPE_COLORS: Record<string, string> = {
+  contribution: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+  loan: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+  welfare: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
+  meeting: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+  announcement: 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400',
+  general: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
+};
+
+export default function NotificationsPage() {
+  const { currentUser } = useAuth();
+  const [notifications, setNotifications] = useState<Notification[]>(defaultNotifications);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    async function loadNotifications() {
+      if (!currentUser?.uid) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const items = await notificationsService.getByUser(currentUser.uid);
+        if (!mounted) return;
+        setNotifications(items);
+      } catch {
+        toast.error('Failed to load notifications');
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+    loadNotifications();
+    return () => {
+      mounted = false;
+    };
+  }, [currentUser]);
+
+  async function markAllRead() {
+    try {
+      await Promise.all(
+        notifications
+          .filter((n) => !n.isRead && n.id)
+          .map((n) => notificationsService.markRead(n.id!))
+      );
+      setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+      toast.success('All notifications marked as read');
+    } catch {
+      toast.error('Failed to update notifications');
+    }
+  }
+
+  async function handleNotificationClick(notif: Notification) {
+    if (!notif.id || notif.isRead) return;
+    try {
+      await notificationsService.markRead(notif.id);
+      setNotifications((prev) => prev.map((item) => item.id === notif.id ? { ...item, isRead: true } : item));
+    } catch {
+      toast.error('Failed to mark notification as read');
+    }
+  }
+
+  const unreadCount = notifications.filter((n) => !n.isRead).length;
+
+  return (
+    <DashboardLayout title="Notifications" subtitle="Stay updated with society activities">
+      <div className="p-4 sm:p-6 space-y-4">
+
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Bell className="w-4 h-4 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">
+              {unreadCount} unread notification{unreadCount !== 1 ? 's' : ''}
+            </span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-1.5 text-xs"
+            onClick={markAllRead}
+          >
+            <CheckCheck className="w-3.5 h-3.5" /> Mark all read
+          </Button>
+        </div>
+
+        {/* Notifications list */}
+        <div className="space-y-2">
+          {notifications.map((notif, i) => {
+            const Icon = TYPE_ICONS[notif.type] || Bell;
+            return (
+              <motion.div
+                key={notif.id}
+                initial={{ opacity: 0, x: -8 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: i * 0.04 }}
+                className={cn(
+                  'bg-card rounded-xl border p-4 cursor-pointer transition-colors',
+                  notif.isRead ? 'border-border' : 'border-primary/30 bg-primary/5'
+                )}
+                onClick={() => handleNotificationClick(notif)}
+              >
+                <div className="flex items-start gap-3">
+                  <div className={cn('w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0', TYPE_COLORS[notif.type])}>
+                    <Icon className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className={cn('text-sm font-semibold', notif.isRead ? 'text-foreground' : 'text-foreground')}>
+                        {notif.title}
+                        {!notif.isRead && (
+                          <span className="ml-2 inline-block w-2 h-2 rounded-full bg-primary align-middle" />
+                        )}
+                      </p>
+                      <span className="text-xs text-muted-foreground flex-shrink-0">{notif.createdAt ? formatDate(notif.createdAt, 'dd MMM yyyy') : '—'}</span>
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-0.5">{notif.message}</p>
+                  </div>
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
+      </div>
+    </DashboardLayout>
+  );
+}
